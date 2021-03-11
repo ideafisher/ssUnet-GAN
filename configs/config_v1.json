@@ -1,0 +1,53 @@
+{
+  "file_path": {
+    "input_path": "../inputs",
+    "model_path": "../models",
+    "output_path": "../outputs",
+    "checkpoint_path": "../checkpoint"
+  },
+  "opt_config": {
+    "name": "chicago_512_ss_unet_GAN_v3",
+    "resume": "False",
+    "epochs": 300,
+    "batch_size": 6,
+    "log_name": "chicago_512_ss_unet_GAN_v3",
+    "arch": "UNet_R_SS",
+    "deep_supervision": "False",
+    "input_channels": 3,
+    "num_classes": 3,
+    "aug_type": "image_mode",
+    "scale_min": 0.5,
+    "scale_max": 2.0,
+    "rotate_min": -10,
+    "rotate_max": 10,
+    "input_w": 512,
+    "input_h": 512,
+    "patch_size":1024,
+    "loss":"BCEDiceLoss",
+    "dataset": "chicago_512",
+    "val_dataset": "chicago_512",
+    "mask_ext": ".png",
+    "img_ext": ".png",
+    "optimizer":"Adam",
+    "lr":1e-4,
+    "momentum":0.9,
+    "weight_decay": 1e-7,
+    "nesterov":"False",
+    "scheduler":"CosineAnnealingLR",
+    "milestones": "20, 40, 60, 80, 100, 200, 250, 300",
+    "min_lr":1e-5,
+    "factor":0.1,
+    "patience":2,
+    "gamma":0.8,
+    "early_stopping":-1,
+    "num_workers":4
+  },
+  "val_config":{
+    "name":"chicago_512_unet_r_ss_v6",
+    "log_name": "chicago_512_ss_unet_GAN_v2",
+    "full_image_path":"../inputs/aerial",
+    "gt_mask_flag":"True",
+    "patch_overlap": 0.5
+  }
+
+}
