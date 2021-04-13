@@ -128,7 +128,7 @@ class Dataset(torch.utils.data.Dataset):
 
             for i in range(self.num_classes):
                 #i = i+1
-                mask_image = cv2.imread(os.path.join(self.mask_dir, str(i),img_id + self.mask_ext), cv2.IMREAD_GRAYSCALE)
+                mask_image = cv2.imread(os.path.join(self.mask_dir, str(i), img_id + self.mask_ext), cv2.IMREAD_GRAYSCALE)
                 mask_image = mask_image.astype('float32') / 255.0
                 mask_image = mask_image.astype('uint8')
                 mask.append(mask_image[..., None])

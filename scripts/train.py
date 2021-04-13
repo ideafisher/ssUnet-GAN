@@ -258,7 +258,7 @@ def validate(config, val_loader, model, criterion):
 def main():
     #config = vars(parse_args_func())
 
-    config_file = "../configs/config_v1.json"
+    config_file = "../configs/config_SN7.json"
     config_dict = json.loads(open(config_file, 'rt').read())
     #config_dict = json.loads(open(sys.argv[1], 'rt').read())
 

@@ -6,11 +6,12 @@
     "checkpoint_path": "../checkpoint"
   },
   "opt_config": {
-    "name": "chicago_512_ss_unet_GAN_v3",
+    "name": "chicago_512_ss_unet_GAN_v7",
+    "generator_name":"chicago_512_unet_r_ss_v6",
     "resume": "False",
     "epochs": 300,
     "batch_size": 6,
-    "log_name": "chicago_512_ss_unet_GAN_v3",
+    "log_name": "chicago_512_ss_unet_GAN_v7",
     "arch": "UNet_R_SS",
     "deep_supervision": "False",
     "input_channels": 3,
@@ -29,7 +30,8 @@
     "mask_ext": ".png",
     "img_ext": ".png",
     "optimizer":"Adam",
-    "lr":1e-4,
+    "lr":5e-4,
+    "gan_lr":2e-5,
     "momentum":0.9,
     "weight_decay": 1e-7,
     "nesterov":"False",
@@ -43,8 +45,8 @@
     "num_workers":4
   },
   "val_config":{
-    "name":"chicago_512_unet_r_ss_v6",
-    "log_name": "chicago_512_ss_unet_GAN_v2",
+    "name":"chicago_512_ss_unet_GAN_v6",
+    "log_name": "chicago_512_ss_unet_GAN_v6",
     "full_image_path":"../inputs/aerial",
     "gt_mask_flag":"True",
     "patch_overlap": 0.5

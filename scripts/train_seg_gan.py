@@ -169,9 +169,9 @@ def train(epoch, config, train_loader,   generator,
     avg_meters = {'loss': AverageMeter(),
                   'iou': AverageMeter(),
                   'dice': AverageMeter()}
-    beta = 1e-2
+    beta = 1e-3
     alpa = 1e-4
-    grad_clip = 0.6
+    grad_clip = 0.8
     generator.train()
     discriminator.train()
     lr_val = optimizer_g.param_groups[0]['lr']
@@ -439,13 +439,13 @@ def main():
     if not os.path.isdir(checkpoint_folder):
         os.mkdir(checkpoint_folder)
     # create generator model
-    val_config = config_dict['val_config']
-    name = val_config['name']
-    with open(os.path.join(model_folder,'%s/config.yml' % name), 'r') as f:
+    #val_config = config_dict['config']
+    generator_name = config['generator_name']
+    with open(os.path.join(model_folder,'%s/config.yml' % generator_name), 'r') as f:
         g_config = yaml.load(f, Loader=yaml.FullLoader)
     generator = Generator(g_config)
     generator.initialize_with_srresnet(model_folder, g_config)
-    lr = 3e-5  # learning rate
+    lr = config['gan_lr']
     # Initialize generator's optimizer
     optimizer_g = torch.optim.Adam(params=filter(lambda p: p.requires_grad, generator.parameters()), lr=lr)
     #params = filter(lambda p: p.requires_grad, generator.parameters())
@@ -524,9 +524,9 @@ def main():
 
         trigger += 1
 
-        if val_log['iou'] > best_iou:
+        if test_log['iou'] > best_iou:
             torch.save(generator.state_dict(), os.path.join(model_folder, '%s/model.pth' % config['name']))
-            best_iou = val_log['iou']
+            best_iou = test_log['iou']
             print("=> saved best model")
             trigger = 0
 

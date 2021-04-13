@@ -16,6 +16,8 @@ import archs
 from dataset import Dataset
 from metrics import iou_score, dice_coef
 from utils import AverageMeter
+from models_seg_gan import Generator, Discriminator, TruncatedVGG19
+import pandas as pd
 
 
 def parse_args():
@@ -28,6 +30,10 @@ def parse_args():
 
     return args
 
+def result_save_to_csv_filename(csv_save_name, result_submission):
+
+    result_submission = pd.DataFrame(result_submission, columns=['filename', 'iou', 'dice'])
+    result_submission.sort_values('filename').to_csv(csv_save_name, index=False)
 
 def save_contour(img, mask_GT, mask_out, save_name):
 
@@ -112,41 +118,59 @@ def main():
     model_folder = file_dict['model_path']  # '../models'
     output_folder = file_dict['output_path']  # '../models'
 
-
-    with open(os.path.join(model_folder,'%s/config.yml' % name), 'r') as f:
-        config = yaml.load(f, Loader=yaml.FullLoader)
-
-    config['name'] = name
-    print('-'*20)
-    for key in config.keys():
-        print('%s: %s' % (key, str(config[key])))
-    print('-'*20)
-
-    cudnn.benchmark = True
-
+    ss_unet_GAN = True
     # create model
-    print("=> creating model %s" % config['arch'])
-    model = archs.__dict__[config['arch']](config['num_classes'],
+    if ss_unet_GAN == False:
+        with open(os.path.join(model_folder, '%s/config.yml' % name), 'r') as f:
+            config = yaml.load(f, Loader=yaml.FullLoader)
+
+        config['name'] = name
+        print('-' * 20)
+        for key in config.keys():
+            print('%s: %s' % (key, str(config[key])))
+        print('-' * 20)
+        cudnn.benchmark = True
+        print("=> creating model %s" % config['arch'])
+        model = archs.__dict__[config['arch']](config['num_classes'],
                                            config['input_channels'],
                                            config['deep_supervision'])
+        model = model.cuda()
 
-    model = model.cuda()
+        #img_ids = glob(os.path.join(input_folder, config['dataset'], 'images', '*' + config['img_ext']))
+        #img_ids = [os.path.splitext(os.path.basename(p))[0] for p in img_ids]
+        #_, val_img_ids = train_test_split(img_ids, test_size=0.2, random_state=41)
+        model_dict = torch.load(os.path.join(model_folder,'%s/model.pth' %config['name']))
+        if "state_dict" in model_dict.keys():
+            model_dict = remove_prefix(model_dict['state_dict'], 'module.')
+        else:
+            model_dict = remove_prefix(model_dict, 'module.')
+        model.load_state_dict(model_dict, strict=False)
+        #model.load_state_dict(torch.load(os.path.join(model_folder,'%s/model.pth' %config['name'])))
+        model.eval()
+    else:
+        val_config = config_dict['val_config']
+        generator_name = val_config['name']
+        with open(os.path.join(model_folder, '%s/config.yml' % generator_name), 'r') as f:
+            config = yaml.load(f, Loader=yaml.FullLoader)
+        generator = Generator(config)
+        generator = generator.cuda()
+        '''
+        with open(os.path.join(model_folder, '%s/config.yml' % name), 'r') as f:
+            config = yaml.load(f, Loader=yaml.FullLoader)
+        '''
+        config['name'] = name
+        model_dict = torch.load(os.path.join(model_folder,'%s/model.pth' %config['name']))
+        if "state_dict" in model_dict.keys():
+            model_dict = remove_prefix(model_dict['state_dict'], 'module.')
+        else:
+            model_dict = remove_prefix(model_dict, 'module.')
+        generator.load_state_dict(model_dict, strict=False)
+        #model.load_state_dict(torch.load(os.path.join(model_folder,'%s/model.pth' %config['name'])))
+        generator.eval()
 
     # Data loading code
     img_ids = glob(os.path.join(input_folder, config['val_dataset'], 'images','test', '*' + config['img_ext']))
     val_img_ids = [os.path.splitext(os.path.basename(p))[0] for p in img_ids]
-
-    #img_ids = glob(os.path.join(input_folder, config['dataset'], 'images', '*' + config['img_ext']))
-    #img_ids = [os.path.splitext(os.path.basename(p))[0] for p in img_ids]
-    #_, val_img_ids = train_test_split(img_ids, test_size=0.2, random_state=41)
-    model_dict = torch.load(os.path.join(model_folder,'%s/model.pth' %config['name']))
-    if "state_dict" in model_dict.keys():
-        model_dict = remove_prefix(model_dict['state_dict'], 'module.')
-    else:
-        model_dict = remove_prefix(model_dict, 'module.')
-    model.load_state_dict(model_dict, strict=False)
-    #model.load_state_dict(torch.load(os.path.join(model_folder,'%s/model.pth' %config['name'])))
-    model.eval()
 
     mean = [0.485, 0.456, 0.406]
     std = [0.229, 0.224, 0.225]
@@ -181,7 +205,8 @@ def main():
     for c in range(config['num_classes']):
         os.makedirs(os.path.join( output_folder, config['name'], str(c)), exist_ok=True)
 
-
+    csv_save_name = os.path.join(output_folder, config['name'] + '_result' + '.csv')
+    result_submission = []
     with torch.no_grad():
         pbar = tqdm(total=len(val_loader))
         for ori_img, input, target, targets,  meta in val_loader:
@@ -189,14 +214,21 @@ def main():
             target = target.cuda()
 
             # compute output
-            if config['deep_supervision']:
-                output = model(input)[-1]
+            if ss_unet_GAN == True:
+                if config['deep_supervision']:
+                    output = generator(input)[-1]
+                else:
+                    output = generator(input)
             else:
-                output = model(input)
+                if config['deep_supervision']:
+                    output = model(input)[-1]
+                else:
+                    output = model(input)
             out_m = output[:, 1:num_classes, :, :].clone()
             tar_m = target[:, 1:num_classes, :, :].clone()
             iou = iou_score(out_m, tar_m)
             dice = dice_coef(out_m, tar_m)
+            result_submission.append([meta['img_id'][0], iou, dice])
             #iou = iou_score(output, target)
             #dice = dice_coef(output, target)
             avg_meters['iou'].update(iou, input.size(0))
@@ -254,6 +286,7 @@ def main():
             pbar.update(1)
         pbar.close()
 
+    result_save_to_csv_filename(csv_save_name, result_submission)
     print('IoU: %.4f' % avg_meters['iou'].avg)
     print('dice: %.4f' % avg_meters['dice'].avg)
 

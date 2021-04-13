@@ -15,10 +15,11 @@ def iou_score(output, target):
     output_[np.isnan(output)] = False
 
     target_ = target > 0.5
+
     intersection = (output_ & target_).sum()
     union = (output_ | target_).sum()
-
-    return (intersection + smooth) / (union + smooth)
+    iou_out = (intersection + smooth) / (union + smooth)
+    return iou_out
 
 
 def dice_coef(output, target):
