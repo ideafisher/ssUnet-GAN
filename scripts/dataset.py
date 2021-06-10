@@ -6,6 +6,8 @@ import torch
 import torch.utils.data
 from glob import glob
 import math
+from tqdm import tqdm
+from collections import OrderedDict
 
 def save_contour(img, mask):
 
@@ -22,8 +24,28 @@ def save_contour(img, mask):
     name = os.path.join(result_dir, 'result_dir_{:d}.png'.format(4))
     cv2.imwrite(name, img)
 
+def image_to_afile(img_dir, mask_dir, base_name, img_ids, config):
+    img_ext = config['img_ext']
+    mask_ext = config['mask_ext']
+    img_mask = OrderedDict()
+    pbar = tqdm(total=len(img_ids))
+    for idx, img_id in enumerate(img_ids):
+        img = cv2.imread(os.path.join(img_dir, img_id + img_ext))
+        img_mask[str(img_id)] = {'img': img}
+        if 0:
+            masks = []
+            for i in range(3):
+                mask_image = cv2.imread(os.path.join(mask_dir, str(i), img_id + mask_ext), cv2.IMREAD_GRAYSCALE)
+                masks.append(mask_image)
+            #mask = cv2.imread(os.path.join(mask_dir, img_id + mask_ext), cv2.IMREAD_GRAYSCALE)
+                img_mask[str(img_id)]={'img': img, 'masks': masks}
+        pbar.update(1)
+    pbar.close()
+    return img_mask
+
+
 class Dataset(torch.utils.data.Dataset):
-    def __init__(self, img_ids, img_dir, mask_dir, img_ext, mask_ext, num_classes, input_channels, transform=None):
+    def __init__(self, img_ids, img_dir, mask_dir, img_ext, mask_ext, num_classes, input_channels, transform=None, from_file=None):
         """
         Args:
             img_ids (list): Image ids.
@@ -65,6 +87,7 @@ class Dataset(torch.utils.data.Dataset):
         self.num_classes = num_classes
         self.input_channels = input_channels
         self.transform = transform
+        self.from_file = from_file
 
     def __len__(self):
         return len(self.img_ids)
@@ -72,25 +95,19 @@ class Dataset(torch.utils.data.Dataset):
     def __getitem__(self, idx):
         img_id = self.img_ids[idx]
         if self.input_channels == 3:
-            img = cv2.imread(os.path.join(self.img_dir, img_id + self.img_ext))
+            if self.from_file == None:
+                img = cv2.imread(os.path.join(self.img_dir, img_id + self.img_ext))
+            else:
+                img = self.from_file[img_id]['img']
         else:
             img = cv2.imread(os.path.join(self.img_dir, img_id + self.img_ext), cv2.IMREAD_GRAYSCALE)
             img = np.expand_dims(img,0)
             img = img.transpose(1, 2, 0)
         ori_img = img
-        if self.num_classes > 1 :
-            is_single_mask = False
-        else:
-            is_single_mask = True
 
-        if is_single_mask == True:
-            path = os.path.join(self.mask_dir, img_id + self.mask_ext)
+        if self.num_classes == 1:
             mask =   cv2.imread(os.path.join(self.mask_dir, img_id + self.mask_ext), cv2.IMREAD_GRAYSCALE)
-
-            #save_contour(img, mask)
-            #mask = np.dstack(mask)
             mask = np.expand_dims(mask,0)
-            #save_contour(img, mask)
             mask = mask.transpose(1, 2, 0)
             mask = (mask / 1.0).astype('uint8')
             if self.transform is not None:
@@ -100,48 +117,28 @@ class Dataset(torch.utils.data.Dataset):
 
             img_size = img.shape
             img_w, img_h = img_size[0], img_size[1]
-
             masks = []
-            if 0:
-                mask_one = mask.transpose(2, 0, 1)
-                mask_one = mask_one.astype('float32') / 255
-                masks.append(mask_one)
-                for idx in range(3):
-                    img_w = int(img_w/2)
-                    img_h = int(img_h/2)
-                    mask1 = cv2.resize(mask, (img_w, img_h))
-                    mask1 = mask1.astype('float32') / 255
-                    mask_one = np.expand_dims(mask1, 0)
-
-                    masks.append(mask_one)
 
             img = img.astype('float32') / 1.0
             img = img.transpose(2, 0, 1)
             mask = mask.astype('float32') / 1.0
             mask = mask.transpose(2, 0, 1)
-
-
-
         else:
             mask = []
             masks = []
-
             for i in range(self.num_classes):
-                #i = i+1
                 mask_image = cv2.imread(os.path.join(self.mask_dir, str(i), img_id + self.mask_ext), cv2.IMREAD_GRAYSCALE)
                 mask_image = mask_image.astype('float32') / 255.0
                 mask_image = mask_image.astype('uint8')
                 mask.append(mask_image[..., None])
-
             mask = np.dstack(mask)
             if self.transform is not None:
                 augmented = self.transform(image=img, mask=mask)
                 img = augmented['image']
                 mask = augmented['mask']
-
-            img = img.astype('float32') / 1.0
+            img = 1.0 * img.astype('float32')
             img = img.transpose(2, 0, 1)
-            mask = mask.astype('float32') / 1.0
+            mask = 1.0 * mask.astype('float32')
             mask = mask.transpose(2, 0, 1)
 
         return ori_img, img, mask, masks, {'img_id': img_id}

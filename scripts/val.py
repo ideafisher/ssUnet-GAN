@@ -49,8 +49,6 @@ def save_contour(img, mask_GT, mask_out, save_name):
     for cnt in contours:
         cv2.drawContours(img, [cnt], 0, (0, 0, 255), 2)
 
-    #result_dir = './checkpoint/result'
-    #name = os.path.join(result_dir, 'result_dir_{:d}.png'.format(2))
     cv2.imwrite(save_name, img)
 
 def save_masking_GT_RE(img, mask_GT, mask_out, save_name):
@@ -103,10 +101,22 @@ def remove_prefix(state_dict, prefix):
     f = lambda x: x.split(prefix, 1)[-1] if x.startswith(prefix) else x
     return {f(key): value for key, value in state_dict.items()}
 
+def save_GT_RE_mask(output_folder, config, meta, class_idx, out_idx, ori_img, mask, mask_output):
+    save_name_GT = os.path.join(output_folder, config['name'], str(class_idx), meta['img_id'][out_idx] + ' _GT_masking' + '.jpg')
+    save_name_RE = os.path.join(output_folder, config['name'], str(class_idx), meta['img_id'][out_idx] + '_RE_masking' + '.jpg')
+    save_name_GT_RE = os.path.join(output_folder, config['name'], str(class_idx),
+                                   meta['img_id'][out_idx] + '_GT_RE_masking' + '.jpg')
+    img = np.array(ori_img[out_idx])
+    save_masking_GT(img, mask, mask_output, save_name_GT)
+    img = np.array(ori_img[out_idx])
+    save_masking_RE(img, mask, mask_output, save_name_RE)
+    img = np.array(ori_img[out_idx])
+    save_masking_GT_RE(img, mask, mask_output, save_name_GT_RE)
+
 
 def main():
     args = parse_args()
-    config_file = "../configs/config_v1.json"
+    config_file = "../configs/config_SN7.json"
     config_dict = json.loads(open(config_file, 'rt').read())
     #config_dict = json.loads(open(sys.argv[1], 'rt').read())
 
@@ -121,6 +131,7 @@ def main():
     ss_unet_GAN = True
     # create model
     if ss_unet_GAN == False:
+        path = os.path.join(model_folder, '%s/config.yml' % name)
         with open(os.path.join(model_folder, '%s/config.yml' % name), 'r') as f:
             config = yaml.load(f, Loader=yaml.FullLoader)
 
@@ -229,54 +240,24 @@ def main():
             iou = iou_score(out_m, tar_m)
             dice = dice_coef(out_m, tar_m)
             result_submission.append([meta['img_id'][0], iou, dice])
-            #iou = iou_score(output, target)
-            #dice = dice_coef(output, target)
+
             avg_meters['iou'].update(iou, input.size(0))
             avg_meters['dice'].update(dice, input.size(0))
-
             output = torch.sigmoid(output).cpu().numpy()
-
-            imgs = input.cpu()
             masks = target.cpu()
             for i in range(len(output)):
 
-                if num_classes <1 :
-                    img = np.array(ori_img[i])
-                    mask = np.array(255*masks[i]).astype('uint8').squeeze(0)
-                    mask_out = np.array(255 * output[i]).astype('uint8').squeeze(0)
+                for idx_c in range(num_classes):
+                    tmp_mask = np.array(masks[i][idx_c])
+                    mask = np.array(255 * tmp_mask).astype('uint8')
+                    mask_out = np.array(255 * output[i][idx_c]).astype('uint8')
+                    mask_output = np.zeros((mask_out.shape[0], mask_out.shape[1]))
+                    mask_output = mask_output.astype('uint8')
+                    mask_ = mask_out > 127
+                    mask_output[mask_] = 255
 
-                    save_name = os.path.join(output_folder, config['name']+'_contour_output', meta['img_id'][i] + '.jpg')
-                    save_contour(img, mask, mask_out, save_name)
-                    for c in range(config['num_classes']):
-                        cv2.imwrite(os.path.join(output_folder, config['name'], str(c), meta['img_id'][i] + '.jpg'),
-                                    (output[i, c] * 255).astype('uint8'))
-                else:
-
-                    for idx_c in range(num_classes):
-                        img = np.array(ori_img[i])
-                        tmp_mask = np.array(masks[i][idx_c])
-                        mask = np.array(255 * tmp_mask).astype('uint8')
-                        mask_out = np.array(255 * output[i][idx_c]).astype('uint8')
-
-                        mask_output = np.zeros((mask_out.shape[0], mask_out.shape[1]))
-                        mask_output = mask_output.astype('uint8')
-                        mask_ = mask_out > 127
-                        mask_output[mask_] = 255
-
-                        #save_name = os.path.join('outputs', config['name'], str(idx_c),  meta['img_id'][i] + '.jpg')
-                        #save_contour(img, mask, mask_output, save_name)
-
-                        if idx_c >0:
-                            save_name_GT = os.path.join(output_folder, config['name'], str(idx_c), meta['img_id'][i]+' _GT_masking' + '.jpg')
-                            save_name_RE = os.path.join(output_folder, config['name'], str(idx_c), meta['img_id'][i] + '_RE_masking' + '.jpg')
-                            save_name_GT_RE = os.path.join(output_folder, config['name'], str(idx_c), meta['img_id'][i] + '_GT_RE_masking' + '.jpg')
-                            img = np.array(ori_img[i])
-                            save_masking_GT(img, mask, mask_output, save_name_GT)
-                            img = np.array(ori_img[i])
-                            save_masking_RE(img, mask, mask_output, save_name_RE)
-                            img = np.array(ori_img[i])
-                            save_masking_GT_RE(img, mask, mask_output, save_name_GT_RE)
-                        #cv2.imwrite(os.path.join('outputs', config['name'], str(idx_c), meta['img_id'][i]+'_mask_' + '.jpg'), mask_output)
+                    if idx_c >0:
+                        save_GT_RE_mask(output_folder, config, meta, idx_c, i, ori_img, mask, mask_output)
 
             postfix = OrderedDict([
                 ('iou', avg_meters['iou'].avg),

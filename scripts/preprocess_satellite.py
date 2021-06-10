@@ -5,6 +5,9 @@ import cv2
 import numpy as np
 from tqdm import tqdm
 import math
+import json
+from collections import OrderedDict, defaultdict
+import _pickle
 from sklearn.model_selection import train_test_split
 
 def save_contour(img, mask):
@@ -24,7 +27,7 @@ def patch_gen(img, mask, p_size):
 
     img_h = img.shape[0]
     img_w = img.shape[1]
-    overlap = 0.5
+    overlap = 1.0
     i_w = int(math.floor(img_w / (overlap * p_size)))-1
     i_h = int(math.floor(img_h / (overlap * p_size)))-1
 
@@ -68,7 +71,7 @@ def post_process_resized_mask(resized_mask):
     #    print('0 label error')
 
     return resized_mask
-def save_image_mask(image_paths, dataset_node, image_name, num_class, img_size):
+def save_image_mask(image_paths, dataset_node, image_name, num_class, p_size, img_size):
     data_cnt = 0
     for i in tqdm(range(len(image_paths))):
         img_path = image_paths[i]
@@ -77,7 +80,7 @@ def save_image_mask(image_paths, dataset_node, image_name, num_class, img_size):
         mask_img_or = cv2.imread(label_path)
 
         #mask_img = cv2.cvtColor(mask_img_or, cv2.COLOR_BGR2GRAY)
-        p_size = 1024
+        #p_size = 1024
         image_patch, mask_patch = patch_gen(img, mask_img_or, p_size)
         for pidx in range(len(image_patch)):
             p_image = image_patch[pidx]
@@ -119,12 +122,11 @@ def save_image_mask(image_paths, dataset_node, image_name, num_class, img_size):
             path = os.path.join('../inputs/{:s}_{:d}'.format(image_name, img_size), 'annotations', dataset_node,  file_name)
             all_mask = (all_mask * 1).astype('uint8')
             cv2.imwrite(path, all_mask)
-def main():
-    img_size = 512
-
-    image_name = 'chicago'
+def main(image_name, img_size):
+    patch_size = 512
+    #image_name = 'chicago'
     image_paths = glob('../inputs/{:s}/*_image.*'.format(image_name))
-    base_paths = os.path.join('inputs',image_name)
+    #base_paths = os.path.join('inputs',image_name)
 
     os.makedirs('../inputs/{:s}_{:d}/images'.format(image_name,img_size), exist_ok=True)
     os.makedirs('../inputs/{:s}_{:d}/masks'.format(image_name, img_size), exist_ok=True)
@@ -150,28 +152,31 @@ def main():
             path = os.path.join(base_path, 'test', str(idx))
             os.makedirs(path, exist_ok=True)
 
+
     dataset_node ='training'
-    save_image_mask(train_image_path, dataset_node, image_name, num_class, img_size)
+    save_image_mask(train_image_path, dataset_node, image_name, num_class, patch_size, img_size)
 
     dataset_node = 'validation'
-    save_image_mask(val_image_path, dataset_node, image_name, num_class, img_size)
+    save_image_mask(val_image_path, dataset_node, image_name, num_class, patch_size, img_size)
 
     dataset_node = 'test'
-    save_image_mask(test_image_path, dataset_node, image_name, num_class, img_size)
+    save_image_mask(test_image_path, dataset_node, image_name, num_class, patch_size, img_size)
 
-def make_data_list():
-    tr_image = glob('../inputs/aerial/images/training/*.*')
-    v_image = glob('../inputs/aerial/images/validation/*.*')
-    t_image = glob('../inputs/aerial/images/test/*.*')
+def make_data_list(image_name, img_size):
+    base_name = image_name+'_{:d}'.format(img_size)
+    base_paths = os.path.join('../inputs', base_name)
+    tr_image = glob(os.path.join(base_paths,'images/training/*.*'))
+    v_image = glob(os.path.join(base_paths,'images/validation/*.*'))
+    t_image = glob(os.path.join(base_paths,'images/test/*.*'))
 
-    tr_annotations = glob('../inputs/aerial/annotations/training/*.*')
-    v_annotations = glob('../inputs/aerial/annotations/validation/*.*')
-    t_annotations = glob('../inputs/aerial/annotations/test/*.*')
+    tr_annotations = glob(os.path.join(base_paths,'annotations/training/*.*'))
+    v_annotations = glob(os.path.join(base_paths,'annotations/validation/*.*'))
+    t_annotations = glob(os.path.join(base_paths,'annotations/test/*.*'))
 
-    list_path = '../inputs/aerial/list'
+    list_path = os.path.join(base_paths,'list')
     os.makedirs(list_path, exist_ok=True)
 
-    f = open("../inputs/aerial/list/test.txt", 'w')
+    f = open(os.path.join(base_paths,'list/test.txt'), 'w')
     v_img_path = 'images/test/'
     v_ann_path = 'annotations/test/'
     for i_path, a_path in zip(t_image, t_annotations):
@@ -184,7 +189,7 @@ def make_data_list():
     f.close()
 
 
-    f = open("../inputs/aerial/list/validation.txt", 'w')
+    f = open(os.path.join(base_paths,'list/validation.txt'), 'w')
     v_img_path = 'images/validation/'
     v_ann_path = 'annotations/validation/'
     for i_path, a_path in zip(v_image, v_annotations):
@@ -196,7 +201,7 @@ def make_data_list():
         f.write("%s\n" % f_set)
     f.close()
 
-    f = open("../inputs/aerial/list/training.txt", 'w')
+    f = open(os.path.join(base_paths,'list/training.txt'), 'w')
     v_img_path = 'images/training/'
     v_ann_path = 'annotations/training/'
     for i_path, a_path in zip(tr_image, tr_annotations):
@@ -210,6 +215,60 @@ def make_data_list():
 
     return 0
 
+def image_to_afile(img_dir, mask_dir, base_name, img_ids, config):
+    img_ext = config['img_ext']
+    mask_ext = config['mask_ext']
+    img_mask = defaultdict(list)
+    pbar = tqdm(total=len(img_ids))
+    for idx, img_id in enumerate(img_ids):
+        tmp_data =[]
+        img = cv2.imread(os.path.join(img_dir, img_id + img_ext))
+        mask = cv2.imread(os.path.join(mask_dir, img_id + mask_ext), cv2.IMREAD_GRAYSCALE)
+        tmp_data.append({'img': img, 'mask': mask})
+        #img_mask[str(img_id)]={'img': img, 'mask': mask}
+        if idx == 10:
+            break
+        pbar.update(1)
+        img_mask[str(img_id)] = tmp_data
+    pbar.close()
+    print(os.path.join(base_name, config['out_filename']))
+    file_new_name = os.path.join(base_name, config['out_filename'])
+    with open(file_new_name, 'w') as f:
+        json.dump(img_mask, f, ensure_ascii=False)
+
+    #_pickle.dump(Img_mask, open(os.path.join(base_name,config['out_filename']), "wb"))
+
+    return  0
+
+def image_mask_save_to_file(image_name, img_size):
+    # Data loading code
+    input_folder =  '../inputs'
+
+    base_name = image_name + '_{:d}'.format(img_size)
+    output_path = os.path.join(input_folder, base_name)
+    config={}
+    config['img_ext'] = ".png"
+    config['mask_ext'] = ".png"
+    config['out_filename'] = base_name+'_train_file.json'
+
+    img_ids = glob(os.path.join(input_folder, base_name, 'images','training', '*' + config['img_ext']))
+    train_img_ids = [os.path.splitext(os.path.basename(p))[0] for p in img_ids]
+
+    #json_input = os.path.join(output_path, config['out_filename'])
+    #img_mask = json.load(open(json_input, 'r'))
+    #img_mask = defaultdict(dataset)
+
+    #img = img_mask[train_img_ids[0]]['img']
+    #mask = img_mask[train_img_ids[0]]['mask']
+
+    img_dir = os.path.join(input_folder, base_name, 'images', 'training')
+    mask_dir = os.path.join(input_folder, base_name, 'annotations', 'training')
+    image_to_afile(img_dir, mask_dir,  output_path, train_img_ids, config)
+
 if __name__ == '__main__':
-    #main()
-    make_data_list()
+    image_name = 'chicago'
+    img_size = 512
+
+    main(image_name, img_size)
+    #image_mask_save_to_file(image_name, img_size)
+    make_data_list(image_name, img_size)

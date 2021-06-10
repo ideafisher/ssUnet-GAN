@@ -24,7 +24,7 @@ import random
 import archs
 import losses
 from losses import masked_L1_loss
-from dataset import Dataset
+from dataset import Dataset, image_to_afile
 from metrics import iou_score, dice_coef
 from utils import AverageMeter, str2bool
 
@@ -56,74 +56,8 @@ def save_tensorboard(writer, train_log, val_log, test_log, epoch):
 def parse_args_func():
     parser = argparse.ArgumentParser(description='test')
 
-    parser.add_argument('--name', default=None,
-                        help='model name: (default: arch+timestamp)')
-    parser.add_argument('--epochs', default=1000, type=int, metavar='N',
-                        help='number of total epochs to run')
-    parser.add_argument('-b', '--batch_size', default=8, type=int,
-                        metavar='N', help='mini-batch size (default: 16)')
-    parser.add_argument('--log_name', default='train_results', type=str)
-    
-    # model
-    parser.add_argument('--arch', '-a', metavar='ARCH', default='NestedUNet',
-                        choices=ARCH_NAMES,
-                        help='model architecture: ' +
-                        ' | '.join(ARCH_NAMES) +
-                        ' (default: NestedUNet)')
-    parser.add_argument('--deep_supervision', default=False, type=str2bool)
-    parser.add_argument('--input_channels', default=3, type=int,
-                        help='input channels')
-    parser.add_argument('--num_classes', default=1, type=int,
-                        help='number of classes')
-    parser.add_argument('--aug_type', type=str, default='medical_mode')
-    parser.add_argument('--input_w', default=96, type=int,
-                        help='image width')
-    parser.add_argument('--input_h', default=96, type=int,
-                        help='image height')
-    
-    # loss
-    parser.add_argument('--loss', default='BCEDiceLoss',
-                        choices=LOSS_NAMES,
-                        help='loss: ' +
-                        ' | '.join(LOSS_NAMES) +
-                        ' (default: BCEDiceLoss)')
-    
-    # dataset
-    parser.add_argument('--dataset', default='dsb2018_96',
-                        help='dataset name')
-    parser.add_argument('--img_ext', default='.png',
-                        help='image file extension')
-    parser.add_argument('--mask_ext', default='.png',
-                        help='mask file extension')
-
-    # optimizer
-    parser.add_argument('--optimizer', default='SGD',
-                        choices=['Adam', 'SGD'],
-                        help='loss: ' +
-                        ' | '.join(['Adam', 'SGD']) +
-                        ' (default: Adam)')
-    parser.add_argument('--lr', '--learning_rate', default=1e-3, type=float,
-                        metavar='LR', help='initial learning rate')
-    parser.add_argument('--momentum', default=0.9, type=float,
-                        help='momentum')
-    parser.add_argument('--weight_decay', default=1e-4, type=float,
-                        help='weight decay')
-    parser.add_argument('--nesterov', default=False, type=str2bool,
-                        help='nesterov')
-
-    # scheduler
-    parser.add_argument('--scheduler', default='CosineAnnealingLR',
-                        choices=['CosineAnnealingLR', 'ReduceLROnPlateau', 'MultiStepLR', 'ConstantLR'])
-    parser.add_argument('--min_lr', default=1e-5, type=float,
-                        help='minimum learning rate')
-    parser.add_argument('--factor', default=0.1, type=float)
-    parser.add_argument('--patience', default=2, type=int)
-    parser.add_argument('--milestones', default='1,2', type=str)
-    parser.add_argument('--gamma', default=2/3, type=float)
-    parser.add_argument('--early_stopping', default=-1, type=int,
-                        metavar='N', help='early stopping (default: -1)')
-    
-    parser.add_argument('--num_workers', default=4, type=int)
+    parser.add_argument('--config', type=str,default='../configs/config_v1.json',
+                        help='config file')
 
     config = parser.parse_args()
 
@@ -137,6 +71,7 @@ def train(epoch, config, train_loader, model, criterion, optimizer, cnn_optimize
                   'dice': AverageMeter()}
 
     model.train()
+    clip =  float(config['clip'])
     lr_val = optimizer.param_groups[0]['lr']
     print('learning rate {:d}: {:f}'.format(epoch, lr_val))
     pbar = tqdm(total=len(train_loader))
@@ -173,6 +108,8 @@ def train(epoch, config, train_loader, model, criterion, optimizer, cnn_optimize
             #iou = iou_score(output, target)
             #dice = dice_coef(output, target)
 
+        for p in model.parameters():
+            p.data.clamp_(-clip, clip)
         # compute gradient and do optimizing step
         optimizer.zero_grad()
         loss.backward()
@@ -256,9 +193,10 @@ def validate(config, val_loader, model, criterion):
 
 
 def main():
-    #config = vars(parse_args_func())
+    args = vars(parse_args_func())
 
-    config_file = "../configs/config_SN7.json"
+    #config_file = "../configs/config_SN7.json"
+    config_file = args['config'] # "../configs/config_v1.json"
     config_dict = json.loads(open(config_file, 'rt').read())
     #config_dict = json.loads(open(sys.argv[1], 'rt').read())
 
@@ -287,6 +225,11 @@ def main():
         config['name'] = '%s_%s_segmodel' % (config['dataset'], config['arch'])
     os.makedirs(os.path.join(model_folder,'%s' % config['name']), exist_ok=True)
 
+    if not os.path.isdir(checkpoint_folder):
+        os.mkdir(checkpoint_folder)
+    log_name = config['name']
+    log_dir = os.path.join(checkpoint_folder,log_name )
+    writer = SummaryWriter(logdir=log_dir)
 
     print('-' * 20)
     for key in config:
@@ -380,15 +323,15 @@ def main():
     img_ids = glob(os.path.join(input_folder, config['dataset'], 'images','training', '*' + config['img_ext']))
     train_img_ids = [os.path.splitext(os.path.basename(p))[0] for p in img_ids]
 
-    #train_img_ids, val_img_ids_1 = train_test_split(img_ids, test_size=0.0001, random_state=41)
+    #img_dir = os.path.join(input_folder, config['dataset'], 'images', 'training')
+    #mask_dir = os.path.join(input_folder, config['dataset'], 'annotations', 'training')
+    #train_image_mask = image_to_afile(img_dir, mask_dir, None, train_img_ids, config)
 
-    #path = os.path.join(input_folder, config['val_dataset'], 'images', 'validation','*' + config['img_ext'])
     img_ids = glob(os.path.join(input_folder, config['val_dataset'], 'images','validation', '*' + config['img_ext']))
     val_img_ids = [os.path.splitext(os.path.basename(p))[0] for p in img_ids]
 
     img_ids = glob(os.path.join(input_folder, config['val_dataset'], 'images','test', '*' + config['img_ext']))
     test_img_ids = [os.path.splitext(os.path.basename(p))[0] for p in img_ids]
-    #val_img_ids, val_img_ids_2 = train_test_split(img_ids, test_size=0.0001, random_state=41)
 
     mean = [0.485, 0.456, 0.406]
     std = [0.229, 0.224, 0.225]
@@ -397,7 +340,6 @@ def main():
         #transforms.RandomScale ([config['scale_min'], config['scale_max']]),
         #transforms.RandomRotate90(),
         transforms.Rotate([config['rotate_min'],  config['rotate_max']], value=mean, mask_value = 0),
-        #transforms.GaussianBlur (),
         transforms.Flip(),
         #transforms.HorizontalFlip (),
         transforms.HueSaturationValue(hue_shift_limit=10, sat_shift_limit=10, val_shift_limit=10),
@@ -408,7 +350,6 @@ def main():
 
     val_transform = Compose([
         transforms.Resize(config['input_h'], config['input_w']),
-        #transforms.Normalize((0.5,0.5,0.5),(0.5,0.5,0.5)),
         transforms.Normalize(mean=mean, std=std),
     ])
 
@@ -420,7 +361,8 @@ def main():
         mask_ext=config['mask_ext'],
         num_classes=config['num_classes'],
         input_channels = config['input_channels'],
-        transform=train_transform)
+        transform=train_transform,
+        from_file=None)
     val_dataset = Dataset(
         img_ids=val_img_ids,
         img_dir=os.path.join(input_folder, config['val_dataset'], 'images','validation'),
@@ -429,16 +371,18 @@ def main():
         mask_ext=config['mask_ext'],
         num_classes=config['num_classes'],
         input_channels=config['input_channels'],
-        transform=val_transform)
+        transform=val_transform,
+        from_file=None)
     test_dataset = Dataset(
-        img_ids=val_img_ids,
+        img_ids=test_img_ids,
         img_dir=os.path.join(input_folder, config['val_dataset'], 'images','test'),
         mask_dir=os.path.join(input_folder, config['val_dataset'], 'annotations','test'),
         img_ext=config['img_ext'],
         mask_ext=config['mask_ext'],
         num_classes=config['num_classes'],
         input_channels=config['input_channels'],
-        transform=val_transform)
+        transform=val_transform,
+        from_file=None)
 
     train_loader = torch.utils.data.DataLoader(
         train_dataset,
@@ -469,20 +413,14 @@ def main():
         ('val_iou', []),
         ('val_dice', []),
     ])
-    if not os.path.isdir(checkpoint_folder):
-        os.mkdir(checkpoint_folder)
 
-    log_name = config['log_name']
-    log_dir = os.path.join(checkpoint_folder,log_name )
-    writer = SummaryWriter(logdir=log_dir)
 
     best_iou = 0
     trigger = 0
     Best_dice = 0
     iou_AtBestDice = 0
     for epoch in range(start_epoch, config['epochs']):
-        print('Epoch [%d/%d]' % (epoch, config['epochs']))
-
+        print('{:s} Epoch [{:d}/{:d}]'.format(config['arch'], epoch, config['epochs']))
         # train for one epoch
         train_log = train(epoch, config, train_loader, model, criterion, optimizer, cnn_optimizer)
         if config['optimizer'] == 'SGD':

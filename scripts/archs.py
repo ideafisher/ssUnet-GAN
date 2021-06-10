@@ -4,8 +4,8 @@ import torch.nn.functional as F
 import torch.nn.utils.spectral_norm as spectral_norm
 from normalization import SPADE
 from xresidualblock import xResidualBlock
-
-__all__ = ['UNet', 'NestedUNet', 'SSUNet', 'UNet_ori', 'ProgUNet', 'UNet_R_SS_effnet', 'UNet_B_SS','AttUNet', 'UNet_R_SS', 'As_UNet_R_SS']
+from torch.nn import init
+__all__ = ['UNet', 'NestedUNet', 'SSUNet', 'UNet_ori', 'UNet_B_SS','AttUNet', 'UNet_R_SS', 'UNet_R_SS_v2']
 
 import os, sys
 from torch import nn
@@ -217,6 +217,14 @@ class BasicBlock(nn.Module):
             self.shortcut = nn.Sequential(
                 nn.Conv2d(in_planes, self.expansion*planes, kernel_size=1, stride=stride, bias=False),
             )
+
+        #self.init_weights()
+
+    def init_weights(self):
+        init.xavier_normal_(self.conv1.weight)
+        init.xavier_normal_(self.conv2.weight)
+        init.xavier_normal_(self.shortcut[0].weight)
+
 
     def forward(self, x):
         if 1: # original RB(Resnet Block)
@@ -458,219 +466,6 @@ class AttentiveCNN(nn.Module):
         return A_out
 
 six_step = True
-class UNet_R_SS_effnet(nn.Module):
-    def __init__(self, num_classes, input_channels=3,  deep_supervision=False, **kwargs):
-        super().__init__()
-        #nb_filter = [128, 256, 512, 768, 1024]
-        six_step = True
-        self.six_step = six_step
-        if self.six_step == False:
-            nb_filter = [ 64, 128, 256, 512, 1024]
-        else:
-            nb_filter = [64, 128, 256, 384, 512, 768]
-        #nb_filter = [32, 64, 128, 256, 512] #512
-        #nb_filter = [16, 32, 64, 128, 256] # 256
-        #nb_filter = [8, 16, 32, 64, 128]
-        model_info = {}
-        model_info['eff_flag'] = True
-        model_info['phase_train'] = True
-        model_info['device'] = 'cuda'
-        model_info['eff_model_name'] = 'efficientnet-b5'
-        self.encoder = AttentiveCNN(model_info)
-        self.encoder.eff_channel
-        eff_channel = self.encoder.eff_channel #self.encoder.f_channel
-
-        spade_mid = num_classes
-        self.pool = nn.MaxPool2d(2, 2)
-        self.up = nn.Upsample(scale_factor=2, mode='bilinear', align_corners=True)
-        context = 'spadebatch3x3' #'spadeinstance3x3'
-        ss_scale = 16
-        self.conv0_0 = BasicBlock(input_channels,nb_filter[0])
-        self.SPADE0_0 = SPADE(context, nb_filter[0], spade_mid,  nb_filter[0] / ss_scale)
-
-        self.conv1_0 = BasicBlock(nb_filter[0], nb_filter[1])
-        self.SPADE1_0 = SPADE(context, nb_filter[1], spade_mid, nb_filter[1] / ss_scale)
-
-        self.conv2_0 = BasicBlock(nb_filter[1], nb_filter[2])
-        self.SPADE2_0 = SPADE(context, nb_filter[2], spade_mid, nb_filter[2] / ss_scale)
-
-        self.conv3_0 = BasicBlock(nb_filter[2], nb_filter[3])
-        self.SPADE3_0 = SPADE(context, nb_filter[3], spade_mid, nb_filter[3] / ss_scale)
-
-        self.conv4_0 = BasicBlock(nb_filter[3],  nb_filter[4])
-        self.SPADE4_0 = SPADE(context, nb_filter[4], spade_mid, nb_filter[4] / ss_scale)
-        if self.six_step == True:
-            self.conv5_0 = BasicBlock(nb_filter[4],  nb_filter[5])
-            self.SPADE5_0 = SPADE(context, nb_filter[5], spade_mid, nb_filter[5] / ss_scale)
-            self.conv4_1 = BasicBlock(nb_filter[4] + nb_filter[5] + eff_channel, nb_filter[4])
-            self.SPADE4_1 = SPADE(context, nb_filter[4], spade_mid, nb_filter[4] / ss_scale)
-
-        self.conv3_1 = BasicBlock(nb_filter[3] + nb_filter[4], nb_filter[3])
-        self.SPADE3_1 = SPADE(context, nb_filter[3], spade_mid, nb_filter[3] / ss_scale)
-
-        self.conv2_2 = BasicBlock(nb_filter[2] + nb_filter[3],nb_filter[2])
-        self.SPADE2_2 = SPADE(context, nb_filter[2], spade_mid, nb_filter[2] / ss_scale)
-
-        self.conv1_3 = BasicBlock(nb_filter[1] + nb_filter[2], nb_filter[1])
-        self.SPADE1_3 = SPADE(context, nb_filter[1], spade_mid, nb_filter[1] / ss_scale)
-        self.sp_up1_3 = SubPixelConvolutionalBlock(3, nb_filter[1], 2)
-
-        self.conv0_4 = BasicBlock(nb_filter[0] + nb_filter[1], nb_filter[0])
-        self.SPADE0_4 = SPADE(context, nb_filter[0], spade_mid, nb_filter[0] / ss_scale)
-
-        self.final = nn.Conv2d(nb_filter[0], num_classes, kernel_size=1)
-
-        self.final_v1 = nn.Sequential( nn.Conv2d(nb_filter[0], 2*num_classes,  kernel_size=1),
-                                       nn.BatchNorm2d(2*num_classes)
-                                       )
-
-        self.final_v2 = nn.Conv2d(2*num_classes, num_classes, kernel_size=1)
-
-    def forward(self, input):
-
-        A = self.encoder(input)
-
-        x0_0 = self.conv0_0(input)
-        x0_0 = self.SPADE0_0(x0_0, x0_0)
-        x1_0 = self.conv1_0(self.pool(x0_0))
-        x1_0 = self.SPADE1_0(x1_0, x1_0)
-        x2_0 = self.conv2_0(self.pool(x1_0))
-        x2_0 = self.SPADE2_0(x2_0, x2_0)
-        x3_0 = self.conv3_0(self.pool(x2_0))
-        x3_0 = self.SPADE3_0(x3_0, x3_0)
-        x4_0 = self.conv4_0(self.pool(x3_0))
-        x4_0 = self.SPADE4_0(x4_0, x4_0)
-        if self.six_step == True:
-            x5_0 = self.conv5_0(self.pool(x4_0))
-            x5_0 = self.SPADE5_0(x5_0, x5_0)
-            fA = F.interpolate(A, size=x5_0.size()[2:], mode='bilinear')
-            cf = torch.cat([x5_0, fA], 1)
-
-            x4_1 = self.conv4_1(torch.cat([x4_0, self.up(cf)], 1))
-            x4_1 = self.SPADE4_1(x4_1, x4_1)
-            x3_1 = self.conv3_1(torch.cat([x3_0, self.up(x4_1)], 1))
-        else:
-            x3_1 = self.conv3_1(torch.cat([x3_0, self.up(x4_0)], 1))
-        x3_1 = self.SPADE3_1(x3_1, x3_1)
-        x2_2 = self.conv2_2(torch.cat([x2_0, self.up(x3_1)], 1))
-        x2_2 = self.SPADE2_2(x2_2, x2_2)
-        x1_3 = self.conv1_3(torch.cat([x1_0, self.up(x2_2)], 1))
-        x1_3 = self.SPADE1_3(x1_3, x1_3)
-        x0_4 = self.conv0_4(torch.cat([x0_0, self.up(x1_3)], 1))
-        x0_4 = self.SPADE0_4(x0_4, x0_4)
-
-        output = self.final(x0_4)
-        #output = self.final_v1(x0_4)
-        #output = self.final_v2(output)
-        return output
-
-class As_UNet_R_SS(nn.Module):
-    def __init__(self, num_classes, input_channels=3,  deep_supervision=False, **kwargs):
-        super().__init__()
-        #nb_filter = [128, 256, 512, 768, 1024]
-        six_step = True
-        self.six_step = six_step
-        if self.six_step == False:
-            nb_filter = [ 64, 128, 256, 512, 1024]
-        else:
-            nb_filter = [64, 128, 256, 384, 512, 768]
-
-        #nb_filter = [32, 64, 128, 256, 512, 1024] #512
-        #add_ch = 64
-        #nb_filter = [32+add_ch, 64+add_ch, 128+add_ch, 256+add_ch, 512+add_ch, 1024]
-        #nb_filter = [16, 32, 64, 128, 256] # 256
-        #nb_filter = [8, 16, 32, 64, 128]
-
-        spade_mid = num_classes
-        self.pool = nn.MaxPool2d(2, 2)
-        self.up = nn.Upsample(scale_factor=2, mode='bilinear', align_corners=True)
-        context = 'spadebatch3x3' #'spadeinstance3x3'
-        ss_scale = 16
-        self.conv0_0 = BasicBlock(input_channels,nb_filter[0])
-        self.SPADE0_0 = SPADE(context, nb_filter[0], spade_mid,  nb_filter[0] / ss_scale)
-
-        self.conv1_0 = BasicBlock(nb_filter[0], nb_filter[1])
-        self.SPADE1_0 = SPADE(context, nb_filter[1], spade_mid, nb_filter[1] / ss_scale)
-
-        self.conv2_0 = BasicBlock(nb_filter[1], nb_filter[2])
-        self.SPADE2_0 = SPADE(context, nb_filter[2], spade_mid, nb_filter[2] / ss_scale)
-
-        self.conv3_0 = BasicBlock(nb_filter[2], nb_filter[3])
-        self.SPADE3_0 = SPADE(context, nb_filter[3], spade_mid, nb_filter[3] / ss_scale)
-
-        self.conv4_0 = BasicBlock(nb_filter[3],  nb_filter[4])
-        self.SPADE4_0 = SPADE(context, nb_filter[4], spade_mid, nb_filter[4] / ss_scale)
-        if six_step == True:
-            self.conv5_0 = BasicBlock(nb_filter[4],  nb_filter[5])
-            self.SPADE5_0 = SPADE(context, nb_filter[5], spade_mid, nb_filter[5] / ss_scale)
-            self.conv4_1 = BasicBlock(nb_filter[4] + nb_filter[5], nb_filter[4])
-            self.SPADE4_1 = SPADE(context, nb_filter[4], spade_mid, nb_filter[4] / ss_scale)
-
-        self.conv3_1 = BasicBlock(nb_filter[3] + nb_filter[4], nb_filter[3])
-        self.SPADE3_1 = SPADE(context, nb_filter[3], spade_mid, nb_filter[3] / ss_scale)
-
-        self.conv2_2 = BasicBlock(nb_filter[2] + nb_filter[3],nb_filter[2])
-        self.SPADE2_2 = SPADE(context, nb_filter[2], spade_mid, nb_filter[2] / ss_scale)
-
-        self.conv1_3 = BasicBlock(nb_filter[1] + nb_filter[2], nb_filter[1])
-        self.SPADE1_3 = SPADE(context, nb_filter[1], spade_mid, nb_filter[1] / ss_scale)
-        self.sp_up1_3 = SubPixelConvolutionalBlock(3, nb_filter[1], 2)
-
-        self.conv0_4 = BasicBlock(nb_filter[0] + nb_filter[1], nb_filter[0])
-        self.SPADE0_4 = SPADE(context, nb_filter[0], spade_mid, nb_filter[0] / ss_scale)
-
-        self.final = nn.Conv2d(nb_filter[0], num_classes, kernel_size=1)
-
-        #self.final_v1 = nn.Sequential( nn.Conv2d(nb_filter[0], 2*num_classes,  kernel_size=1), nn.BatchNorm2d(2*num_classes) )
-        ks = 3
-        pw = ks // 2
-        self.final_v1 = nn.Conv2d(nb_filter[0], 32, kernel_size= 3, padding= pw)
-        self.SPADE0_f1 = SPADE(context, 32, spade_mid, 32/2)
-        self.final_v2 = nn.Conv2d(32, 16, kernel_size= 3, padding= pw)
-        self.SPADE0_f2 = SPADE(context, 16, spade_mid, 16/2)
-        self.final_v3 = nn.Conv2d(16, num_classes, kernel_size=1)
-
-
-    def forward(self, input):
-
-        x0_0 = self.conv0_0(input)
-        x0_0 = self.SPADE0_0(x0_0, x0_0)
-        x1_0 = self.conv1_0(self.pool(x0_0))
-        x1_0 = self.SPADE1_0(x1_0, x1_0)
-        x2_0 = self.conv2_0(self.pool(x1_0))
-        x2_0 = self.SPADE2_0(x2_0, x2_0)
-        x3_0 = self.conv3_0(self.pool(x2_0))
-        x3_0 = self.SPADE3_0(x3_0, x3_0)
-        x4_0 = self.conv4_0(self.pool(x3_0))
-        x4_0 = self.SPADE4_0(x4_0, x4_0)
-        if self.six_step == True:
-            x5_0 = self.conv5_0(self.pool(x4_0))
-            x5_0 = self.SPADE5_0(x5_0, x5_0)
-            x4_1 = self.conv4_1(torch.cat([x4_0, self.up(x5_0)], 1))
-            x4_1 = self.SPADE4_1(x4_1, x4_1)
-            x3_1 = self.conv3_1(torch.cat([x3_0, self.up(x4_1)], 1))
-        else:
-            x3_1 = self.conv3_1(torch.cat([x3_0, self.up(x4_0)], 1))
-        x3_1 = self.SPADE3_1(x3_1, x3_1)
-        x2_2 = self.conv2_2(torch.cat([x2_0, self.up(x3_1)], 1))
-        x2_2 = self.SPADE2_2(x2_2, x2_2)
-        x1_3 = self.conv1_3(torch.cat([x1_0, self.up(x2_2)], 1))
-        x1_3 = self.SPADE1_3(x1_3, x1_3)
-        x0_4 = self.conv0_4(torch.cat([x0_0, self.up(x1_3)], 1))
-        x0_4 = self.SPADE0_4(x0_4, x0_4)
-
-
-        #output = self.final(x0_4)
-        of1 = self.final_v1(x0_4)
-        of1 = self.SPADE0_f1(of1, of1)
-        of2 = self.final_v2(of1)
-        of2 = self.SPADE0_f2(of2, of2)
-        output = self.final_v3(of2)
-
-        #output = self.final_v2(output)
-        return output
-
-
 class UNet_R_SS(nn.Module):
     def __init__(self, num_classes, input_channels=3,  deep_supervision=False, **kwargs):
         super().__init__()
@@ -683,7 +478,7 @@ class UNet_R_SS(nn.Module):
             nb_filter = [64, 128, 256, 384, 512, 768]
 
         spade_mid = num_classes
-        self.pool = nn.MaxPool2d(2, 2)
+        self.pool = nn.MaxPool2d(2, 2, return_indices=False)
         self.up = nn.Upsample(scale_factor=2, mode='bilinear', align_corners=True)
         context = 'spadebatch3x3' #'spadeinstance3x3'
         ss_scale = 16
@@ -722,11 +517,12 @@ class UNet_R_SS(nn.Module):
 
         self.final = nn.Conv2d(nb_filter[0], num_classes, kernel_size=1)
 
-        self.final_v1 = nn.Sequential( nn.Conv2d(nb_filter[0], 2*num_classes,  kernel_size=1),
-                                       nn.BatchNorm2d(2*num_classes)
-                                       )
+        self.init_weights()
 
-        self.final_v2 = nn.Conv2d(2*num_classes, num_classes, kernel_size=1)
+    def init_weights(self):
+        init.kaiming_uniform_(self.final.weight, mode='fan_in')
+        self.final.bias.data.fill_(0)
+
 
     def forward(self, input):
 
@@ -756,10 +552,122 @@ class UNet_R_SS(nn.Module):
         x0_4 = self.conv0_4(torch.cat([x0_0, self.up(x1_3)], 1))
         x0_4 = self.SPADE0_4(x0_4, x0_4)
 
-
         output = self.final(x0_4)
-        #output = self.final_v1(x0_4)
-        #output = self.final_v2(output)
+        return output
+
+
+class UNet_R_SS_v2(nn.Module):
+    def __init__(self, num_classes, input_channels=3,  deep_supervision=False, **kwargs):
+        super().__init__()
+        #nb_filter = [128, 256, 512, 768, 1024]
+        six_step = True
+        self.six_step = six_step
+        if self.six_step == False:
+            nb_filter = [ 64, 128, 256, 512, 1024]
+        else:
+            nb_filter = [64, 128, 256, 384, 512, 768]
+
+        spade_mid = num_classes
+        self.pool = nn.MaxPool2d(2, 2, return_indices=True)
+        self.unpool = nn.MaxUnpool2d(2, stride=2)
+        self.up = nn.Upsample(scale_factor=2, mode='bilinear', align_corners=True)
+        context = 'spadebatch3x3' #'spadeinstance3x3'
+        ss_scale = 16
+        self.conv0_0 = BasicBlock(input_channels,nb_filter[0])
+        self.SPADE0_0 = SPADE(context, nb_filter[0], spade_mid,  nb_filter[0] / ss_scale)
+
+        self.conv1_0 = BasicBlock(nb_filter[0], nb_filter[1])
+        self.SPADE1_0 = SPADE(context, nb_filter[1], spade_mid, nb_filter[1] / ss_scale)
+
+        self.conv2_0 = BasicBlock(nb_filter[1], nb_filter[2])
+        self.SPADE2_0 = SPADE(context, nb_filter[2], spade_mid, nb_filter[2] / ss_scale)
+
+        self.conv3_0 = BasicBlock(nb_filter[2], nb_filter[3])
+        self.SPADE3_0 = SPADE(context, nb_filter[3], spade_mid, nb_filter[3] / ss_scale)
+
+        self.conv4_0 = BasicBlock(nb_filter[3],  nb_filter[4])
+        self.SPADE4_0 = SPADE(context, nb_filter[4], spade_mid, nb_filter[4] / ss_scale)
+
+        self.conv5_0 = BasicBlock(nb_filter[4],  nb_filter[5])
+        self.SPADE5_0 = SPADE(context, nb_filter[5], spade_mid, nb_filter[5] / ss_scale)
+        self.conv_head5_0 = nn.Conv2d(nb_filter[5], nb_filter[4], kernel_size=1, stride=1, bias=False)
+
+        self.conv4_1 = BasicBlock(nb_filter[4] + nb_filter[4], nb_filter[4])
+        self.SPADE4_1 = SPADE(context, nb_filter[4], spade_mid, nb_filter[4] / ss_scale)
+        self.conv_head4_1 = nn.Conv2d(nb_filter[4], nb_filter[3], kernel_size=1, stride=1, bias=False)
+
+        self.conv3_1 = BasicBlock(nb_filter[3] + nb_filter[3], nb_filter[3])
+        self.SPADE3_1 = SPADE(context, nb_filter[3], spade_mid, nb_filter[3] / ss_scale)
+        self.conv_head3_1 = nn.Conv2d(nb_filter[3], nb_filter[2], kernel_size=1, stride=1, bias=False)
+
+        self.conv2_1 = BasicBlock(nb_filter[2] + nb_filter[2],nb_filter[2])
+        self.SPADE2_1 = SPADE(context, nb_filter[2], spade_mid, nb_filter[2] / ss_scale)
+        #self.conv_head2_1 = nn.Conv2d(nb_filter[2], nb_filter[1], kernel_size=1, stride=1, bias=False)
+
+        self.conv1_1 = BasicBlock(nb_filter[1] + nb_filter[2], nb_filter[1])
+        self.SPADE1_1 = SPADE(context, nb_filter[1], spade_mid, nb_filter[1] / ss_scale)
+        #self.conv_head1_1 = nn.Conv2d(nb_filter[1], nb_filter[0], kernel_size=1, stride=1, bias=False)
+
+
+        self.conv0_1 = BasicBlock(nb_filter[0] + nb_filter[1], nb_filter[0])
+        self.SPADE0_1 = SPADE(context, nb_filter[0], spade_mid, nb_filter[0] / ss_scale)
+
+        self.final = nn.Conv2d(nb_filter[0], num_classes, kernel_size=1)
+
+        self.init_weights()
+
+    def init_weights(self):
+        init.kaiming_uniform_(self.final.weight, mode='fan_in')
+        self.final.bias.data.fill_(0)
+
+    def forward(self, input):
+
+        enc_0 = self.conv0_0(input)
+        enc_0 = self.SPADE0_0(enc_0, enc_0)
+
+        output0_0, indices0_0 = self.pool(enc_0)
+        enc_1 = self.conv1_0(output0_0)
+        enc_1 = self.SPADE1_0(enc_1, enc_1)
+
+        output1_0, indices1_0 = self.pool(enc_1)
+        enc_2_0 = self.conv2_0(output1_0)
+        enc_2_0 = self.SPADE2_0(enc_2_0, enc_2_0)
+
+        output2_0, indices2_0 = self.pool(enc_2_0)
+        enc_3 = self.conv3_0(output2_0)
+        enc_3 = self.SPADE3_0(enc_3, enc_3)
+
+        output3_0, indices3_0 = self.pool(enc_3)
+        enc_4 = self.conv4_0(output3_0)
+        enc_4 = self.SPADE4_0(enc_4, enc_4)
+        output4_0, indices4_0 = self.pool(enc_4)
+
+        enc_5 = self.conv5_0(output4_0)
+        enc_5 = self.SPADE5_0(enc_5, enc_5)
+        enc_5 = self.conv_head5_0(enc_5)
+        enc_5_up = self.unpool(enc_5, indices4_0)
+
+        # decode + cat
+        dec_4 = self.conv4_1(torch.cat([enc_4, enc_5_up], 1))
+        dec_4 = self.SPADE4_1(dec_4, dec_4)
+        dec_4 = self.conv_head4_1(dec_4)
+        dec_4_up = self.unpool(dec_4, indices3_0)
+
+        dec_3 = self.conv3_1(torch.cat([enc_3, dec_4_up], 1))
+        dec_3 = self.SPADE3_1(dec_3, dec_3)
+        dec_3 = self.conv_head3_1(dec_3)
+        dec_3_up = self.unpool(dec_3, indices2_0)
+
+        dec_2 = self.conv2_1(torch.cat([enc_2_0, dec_3_up], 1))
+        dec_2 = self.SPADE2_1(dec_2, dec_2)
+
+        dec_1 = self.conv1_1(torch.cat([enc_1, self.up(dec_2)], 1))
+        dec_1 = self.SPADE1_1(dec_1, dec_1)
+
+        dec_0 = self.conv0_1(torch.cat([enc_0, self.up(dec_1)], 1))
+        dec_0 = self.SPADE0_1(dec_0, dec_0)
+
+        output = self.final(dec_0)
         return output
 
 class SSUNet(nn.Module):
@@ -1070,7 +978,6 @@ class UNet_ori(nn.Module):
         # decoding + concat path
         d5 = self.Up5(x5)
         d5 = torch.cat((x4, d5), dim=1)
-
         d5 = self.Up_conv5(d5)
 
         d4 = self.Up4(d5)

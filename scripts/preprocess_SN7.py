@@ -256,6 +256,7 @@ def main():
     save_image_mask(test_image_path, dataset_node, image_name, num_class, img_size)
 
 def make_data_list():
+
     tr_image = glob('../inputs/aerial/images/training/*.*')
     v_image = glob('../inputs/aerial/images/validation/*.*')
     t_image = glob('../inputs/aerial/images/test/*.*')

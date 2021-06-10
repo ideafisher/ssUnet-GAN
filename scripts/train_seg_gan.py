@@ -169,8 +169,8 @@ def train(epoch, config, train_loader,   generator,
     avg_meters = {'loss': AverageMeter(),
                   'iou': AverageMeter(),
                   'dice': AverageMeter()}
-    beta = 1e-3
     alpa = 1e-4
+    beta = 1e-3
     grad_clip = 0.8
     generator.train()
     discriminator.train()
@@ -297,7 +297,9 @@ def validate(config, val_loader, generator, criterion):
 def main():
     # config = vars(parse_args_func())
 
-    config_file = "../configs/config_v1.json"
+    #config_file = "../configs/config_v1.json"
+    args = vars(parse_args_func())
+    config_file = args['config']
     config_dict = json.loads(open(config_file, 'rt').read())
     # config_dict = json.loads(open(sys.argv[1], 'rt').read())
 
@@ -390,8 +392,8 @@ def main():
         transform=train_transform)
     val_dataset = Dataset(
         img_ids=val_img_ids,
-        img_dir=os.path.join(input_folder, config['val_dataset'], 'images', 'validation'),
-        mask_dir=os.path.join(input_folder, config['val_dataset'], 'annotations', 'validation'),
+        img_dir=os.path.join(input_folder, config['dataset'], 'images', 'validation'),
+        mask_dir=os.path.join(input_folder, config['dataset'], 'annotations', 'validation'),
         img_ext=config['img_ext'],
         mask_ext=config['mask_ext'],
         num_classes=config['num_classes'],
@@ -399,8 +401,8 @@ def main():
         transform=val_transform)
     test_dataset = Dataset(
         img_ids=val_img_ids,
-        img_dir=os.path.join(input_folder, config['val_dataset'], 'images', 'test'),
-        mask_dir=os.path.join(input_folder, config['val_dataset'], 'annotations', 'test'),
+        img_dir=os.path.join(input_folder, config['dataset'], 'images', 'test'),
+        mask_dir=os.path.join(input_folder, config['dataset'], 'annotations', 'test'),
         img_ext=config['img_ext'],
         mask_ext=config['mask_ext'],
         num_classes=config['num_classes'],
@@ -481,7 +483,7 @@ def main():
 
     if not os.path.isdir(checkpoint_folder):
         os.mkdir(checkpoint_folder)
-    log_name = config['log_name']
+    log_name = config['name']
     log_dir = os.path.join(checkpoint_folder, log_name)
     writer = SummaryWriter(logdir=log_dir)
 
@@ -521,7 +523,6 @@ def main():
         log['val_dice'].append(val_log['dice'])
 
         pd.DataFrame(log).to_csv(os.path.join(model_folder, '%s/log.csv' % config['name']), index=False)
-
         trigger += 1
 
         if test_log['iou'] > best_iou:

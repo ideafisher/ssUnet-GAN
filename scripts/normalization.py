@@ -9,6 +9,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from batchnorm import SynchronizedBatchNorm2d
 import torch.nn.utils.spectral_norm as spectral_norm
+from torch.nn import init
 
 
 # Returns a function that creates a normalization function
@@ -94,6 +95,14 @@ class SPADE(nn.Module):
         self.mlp_gamma = nn.Conv2d(nhidden, norm_nc, kernel_size=ks, padding=pw)
         self.mlp_beta = nn.Conv2d(nhidden, norm_nc, kernel_size=ks, padding=pw)
 
+        #self.init_weights()
+
+    def init_weights(self):
+        init.xavier_normal_(self.mlp_shared[0].weight)
+        init.xavier_normal_(self.x2map.weight)
+        init.xavier_normal_(self.mlp_gamma.weight)
+        init.xavier_normal_(self.mlp_beta.weight)
+
     def forward(self, x, segmap):
 
         # Part 1. generate parameter-free normalized activations
@@ -107,9 +116,7 @@ class SPADE(nn.Module):
         actv = self.mlp_shared(segmap)
         gamma = self.mlp_gamma(actv)
         beta = self.mlp_beta(actv)
-
         # apply scale and bias
-
         out = normalized * (1 + gamma) + beta
 
         return out

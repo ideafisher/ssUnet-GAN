@@ -6,13 +6,12 @@
     "checkpoint_path": "../checkpoint"
   },
   "opt_config": {
-    "name": "chicago_512_ss_unet_GAN_v7",
-    "generator_name":"chicago_512_unet_r_ss_v6",
+    "name": "chicago_512_ssUNet_R_v2_v2",
+    "generator_name":"chicago_512_UNet_R_SS_v2_v2",
     "resume": "False",
-    "epochs": 300,
+    "epochs": 100,
     "batch_size": 6,
-    "log_name": "chicago_512_ss_unet_GAN_v7",
-    "arch": "UNet_R_SS",
+    "arch": "UNet_R_SS_v2",
     "deep_supervision": "False",
     "input_channels": 3,
     "num_classes": 3,
@@ -30,7 +29,7 @@
     "mask_ext": ".png",
     "img_ext": ".png",
     "optimizer":"Adam",
-    "lr":5e-4,
+    "lr":1e-4,
     "gan_lr":2e-5,
     "momentum":0.9,
     "weight_decay": 1e-7,
@@ -40,9 +39,10 @@
     "min_lr":1e-5,
     "factor":0.1,
     "patience":2,
+    "clip" : 0.7,
     "gamma":0.8,
     "early_stopping":-1,
-    "num_workers":4
+    "num_workers":3
   },
   "val_config":{
     "name":"chicago_512_ss_unet_GAN_v6",
